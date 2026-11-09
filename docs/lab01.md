@@ -115,3 +115,64 @@ La classe `java.io.File` fait partie de la bibliothèque standard Java (JVM) et 
 ## Etape 7
 
 5. Une `UIException` est levée
+
+### Questions
+
+## 1. Développement UI sur cible Desktop
+
+* **Boucle de rétroaction ultra-rapide :** L'exécution et le Hot Reload sur Desktop s'exécutent en quelques millisecondes, sans avoir à lancer ni charger un émulateur mobile lourd.
+* **Économie de ressources :** Ne nécessite pas de consommer la mémoire RAM et le CPU requis par l'émulation Android/iOS.
+* **Gain de productivité :** Permet d'ajuster l'ergonomie, les composants et la logique d'affichage très rapidement avant les tests finaux sur mobiles.
+
+## 2. Hot Reload vs Redémarrage
+
+* **Hot Reload :** Injecte dynamiquement les modifications de code de l'interface utilisateur dans l'application en cours d'exécution, sans réinitialiser son état ni relancer le processus JVM.
+* **Redémarrage complet :** Relance le processus à zéro et réinitialise entièrement l'état de l'application.
+* **Changements ayant nécessité un redémarrage à l'étape 7 :** Les modifications de signatures de fonctions (comme l'ajout de `sayHelloFR`), la création de nouvelles fonctions de niveau supérieur et les modifications de structure qui ne peuvent pas être rechargées à chaud.
+
+## 3. Ajout d'un bloc `androidTarget { }` de 2023
+
+* Le build échouera avec une erreur de syntaxe DSL Gradle (`Unresolved reference: androidTarget`).
+* Avec la version moderne d'AGP 9+ et du plugin Android Multiplatform Library, l'ancienne syntaxe `androidTarget { }` a été remplacée par le bloc `android { }` configuré via la nouvelle API.
+
+## 4. Mécanisme du texte d'accueil spécifique par plateforme
+
+* Le mécanisme repose sur le motif **`expect` / `actual`** de Kotlin Multiplatform.
+* Dans `commonMain`, la classe `Greeting` fait appel à la fonction `expect fun getPlatform(): Platform`.
+* Chaque plateforme (`androidMain`, `iosMain`, `jvmMain`, etc.) fournit son propre fichier avec `actual fun getPlatform(): Platform` retournant un nom propre au système d'exploitation (`Android`, `iOS`, `Desktop (Mac OS X)`, etc.).
+
+## 5. Analyse du code et sécurité (DEX, JVM bytecode, binaire natif)
+
+* **Le plus facile à analyser :** Le **bytecode JVM** (Desktop) et le fichier **DEX** (Android).
+* **Pourquoi :** Ces formats conservent la structure des classes et des métadonnées, rendant la décompilation très aisée vers un code Java/Kotlin lisible avec des outils comme JADX ou JD-GUI. Le binaire iOS (Mach-O) est en binaire natif assembleur, beaucoup plus dur à décompiler.
+* **Importance pour `commonMain` :** Tout code ou secret (clés d'API, algorithme confidentiel) placé dans `commonMain` sera présent dans l'APK Android ou le JAR Desktop. Un attaquant n'a qu'à décompiler la version Android/Desktop pour extraire le code de `commonMain`, même si l'application iOS est compilée en natif.
+
+## 6. Tâches Gradle d'exécution et Hot Reload
+
+* **Tâches d'exécution :**
+    * `:desktopApp:run` (Exécution Desktop standard)
+    * `:desktopApp:hotRun` (Exécution Desktop avec **Hot Reload**)
+    * `:webApp:wasmJsBrowserDevelopmentRun` (Exécution Web Wasm)
+    * `:webApp:jsBrowserDevelopmentRun` (Exécution Web JS)
+* **Tâche de Hot Reload :** `:desktopApp:hotRun` (souvent utilisée avec le fanion `--auto`).
+
+## 7. Sorties de compilation (`.class` et `.klib`)
+
+* **Emplacement des fichiers `.class` :** Ils se trouvent dans le répertoire `shared/build/classes/kotlin/jvm/main/` pour la cible JVM.
+* **Fichiers/dossiers `.klib` :** Ils se trouvent dans `shared/build/classes/kotlin/iosSimulatorArm64/main/` (ou dans le cache des klibs).
+* **Rôle des `.klib` :** Une `klib` (Kotlin Library) est le format d'archive intermédiaire binaire spécifique à Kotlin Multiplatform. Elle contient l'IR (représentation intermédiaire) Kotlin et les métadonnées d'interopérabilité nécessaires au compilateur Kotlin/Native pour générer le binaire iOS final.
+
+## 8. Arbre de dépendances runtime Desktop et Skiko
+
+* **Bibliothèque présente :** `org.jetbrains.skiko:skiko-awt-*` (ex: `skiko-awt-runtime-macosx-arm64`).
+* **Pourquoi :** Compose Multiplatform s'appuie sur le moteur graphique 2D **Skia**. **Skiko** (Skia for Kotlin) fournit la liaison entre Kotlin et Skia. Sur Desktop JVM, Compose s'intègre avec AWT/Swing et utilise Skiko-AWT pour effectuer le rendu visuel accéléré par le GPU.
+
+## 9. Rôle des Preflight checks
+
+* **Rôle :** Ces vérifications contrôlent avant la compilation que l'environnement dispose des outils nécessaires (installations de Xcode, `xcode-select`, SDK Android, version de JDK compatible, simulateurs).
+* **Impact de la désactivation :** Si une vérification iOS est désactivée et qu'un outil manque, l'erreur ne sera pas détectée préventivement par l'IDE mais provoquera un échec brutal et obscur lors de la phase de compilation native par Gradle/Xcode.
+
+## 10. Comparaison du rendu du bouton iOS vs Android
+
+* **Visuel :** Le composable `Button` venant de la bibliothèque commune Compose Material 3 (`androidx.compose.material3`), l'apparence visuelle du bouton (forme, couleur, typographie) est identique sur iOS et Android.
+* **Comportement :** L'animation de clic (effet de vague / ripple), le défilement tactile et la gestion du retour système s'adaptent aux composants et au canvas graphique natif de chaque OS.
